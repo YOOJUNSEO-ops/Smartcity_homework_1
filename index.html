@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>성북구 토지이용 분석</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Malgun Gothic',sans-serif; height:100vh; display:flex; flex-direction:column; background:#f0f2f5; }
+
+    /* ── 헤더 ─────────────────────────────────────── */
+    #header {
+      background:linear-gradient(135deg,#1a3a5c,#2563a8);
+      color:white; padding:10px 18px;
+      display:flex; align-items:center; gap:14px;
+      z-index:1000; flex-shrink:0;
+      box-shadow:0 2px 8px rgba(0,0,0,0.3);
+    }
+    #header h1 { font-size:17px; font-weight:700; letter-spacing:-0.3px; }
+    #header .meta { font-size:11px; color:#a8c4e0; }
+    .view-btn {
+      padding:5px 13px; border:1px solid rgba(255,255,255,0.35);
+      background:rgba(255,255,255,0.08); color:#ddeeff;
+      border-radius:20px; cursor:pointer; font-size:12px;
+      font-family:inherit; transition:all 0.18s;
+    }
+    .view-btn:hover { background:rgba(255,255,255,0.18); }
+    .view-btn.active { background:#4a9eed; border-color:#4a9eed; color:white; font-weight:600; }
+
+    /* ── 레이아웃 ──────────────────────────────────── */
+    #main { display:flex; flex:1; overflow:hidden; }
+    #map { flex:1; }
+
+    #sidebar {
+      width:310px; background:#f8f9fb;
+      border-left:1px solid #dde2ea;
+      display:flex; flex-direction:column;
+      overflow:hidden; flex-shrink:0;
+    }
+
+    /* ── 패널 공통 ────────────────────────────────── */
+    .panel { background:white; border-bottom:1px solid #eaecf0; padding:12px 14px; }
+    .panel-title {
+      font-size:12px; font-weight:700; color:#1a3a5c;
+      margin-bottom:10px; text-transform:uppercase;
+      letter-spacing:0.5px; display:flex; align-items:center; gap:6px;
+    }
+    .panel-title::before { content:''; width:3px; height:13px; background:#4a9eed; border-radius:2px; display:inline-block; }
+
+    /* ── 호버 툴팁 ────────────────────────────────── */
+    #map-tooltip {
+      position:fixed; display:none; z-index:9000;
+      background:rgba(20,40,70,0.92); color:white;
+      padding:7px 10px; border-radius:6px;
+      font-size:11px; line-height:1.6;
+      pointer-events:none; max-width:220px;
+      box-shadow:0 3px 12px rgba(0,0,0,0.3);
+    }
+    #map-tooltip .tt-main { font-size:12px; font-weight:700; margin-bottom:2px; }
+    #map-tooltip .tt-sub { color:#aaccee; }
+
+    /* ── 클릭 팝업 ────────────────────────────────── */
+    #popup-panel { display:none; }
+    #popup-addr { font-size:13px; font-weight:700; color:#1a3a5c; margin-bottom:8px; }
+    .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+    .info-cell {
+      background:#f4f6fb; border-radius:5px; padding:5px 7px;
+    }
+    .info-cell .ik { font-size:10px; color:#888; }
+    .info-cell .iv { font-size:12px; font-weight:600; color:#222; margin-top:1px; }
+    .info-cell.wide { grid-column:1/3; }
+    .tag {
+      display:inline-block; padding:2px 8px; border-radius:10px;
+      font-size:11px; font-weight:600; color:white; margin-top:2px;
+    }
+
+    /* ── 차트 & 비율테이블 ────────────────────────── */
+    #stats-scroll { flex:1; overflow-y:auto; }
+    #chart-wrap { height:200px; position:relative; margin-bottom:10px; }
+
+    .ratio-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .ratio-table th {
+      background:#f0f4fa; color:#555; font-weight:600;
+      padding:5px 6px; text-align:left; border-bottom:2px solid #dde2ea;
+      position:sticky; top:0;
+    }
+    .ratio-table th:last-child, .ratio-table td:last-child { text-align:right; }
+    .ratio-table td { padding:4px 6px; border-bottom:1px solid #f0f0f0; vertical-align:middle; }
+    .ratio-table tr:hover td { background:#f7f9fc; }
+    .ratio-bar-wrap { display:flex; align-items:center; gap:5px; }
+    .ratio-bar-bg { flex:1; height:6px; background:#eee; border-radius:3px; min-width:40px; }
+    .ratio-bar { height:6px; border-radius:3px; }
+    .ratio-pct { width:36px; text-align:right; font-weight:600; color:#333; }
+
+    /* ── 범례 ─────────────────────────────────────── */
+    #legend-list { display:flex; flex-wrap:wrap; gap:4px; }
+    .legend-item {
+      display:flex; align-items:center; gap:4px;
+      font-size:11px; color:#444; padding:2px 6px;
+      background:#f4f6fb; border-radius:10px;
+    }
+    .legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+
+    /* ── 로딩 ─────────────────────────────────────── */
+    #loading {
+      position:fixed; inset:0; background:rgba(255,255,255,0.95);
+      display:flex; flex-direction:column;
+      align-items:center; justify-content:center; z-index:9999;
+    }
+    .spinner {
+      width:48px; height:48px;
+      border:4px solid #e0e8f0; border-top-color:#2563a8;
+      border-radius:50%; animation:spin 0.75s linear infinite;
+    }
+    #loading p { margin-top:14px; color:#556; font-size:13px; }
+    #loading .sub { font-size:11px; color:#aab; margin-top:4px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p id="loading-msg">데이터 로드 중...</p>
+  <p class="sub" id="loading-sub">필지 52,970개 · 읍면동 인구 20개</p>
+</div>
+
+<div id="map-tooltip"><div class="tt-main" id="tt-main"></div><div class="tt-sub" id="tt-sub"></div></div>
+
+<div id="header">
+  <h1>성북구 토지이용 분석</h1>
+  <span class="meta">필지 52,970개 · 건축물 937건 · 읍면동 인구 20개</span>
+  <div style="margin-left:auto;display:flex;gap:6px;">
+    <button class="view-btn active" id="btn-yodojiyeok" onclick="setView('yodojiyeok')">용도지역</button>
+    <button class="view-btn" id="btn-iyongsang"   onclick="setView('iyongsang')">이용상황</button>
+    <button class="view-btn" id="btn-juyongdo"    onclick="setView('juyongdo')">주용도</button>
+    <button class="view-btn" id="btn-census"      onclick="setView('census')">인구</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="map"></div>
+
+  <div id="sidebar">
+
+    <!-- 클릭 팝업 -->
+    <div class="panel" id="popup-panel">
+      <div class="panel-title">선택 필지</div>
+      <div id="popup-addr"></div>
+      <div class="info-grid" id="popup-grid"></div>
+    </div>
+
+    <!-- 차트 -->
+    <div class="panel">
+      <div class="panel-title" id="chart-title">용도지역 분포</div>
+      <div id="chart-wrap"><canvas id="myChart"></canvas></div>
+    </div>
+
+    <!-- 비율 테이블 -->
+    <div class="panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+      <div class="panel-title" id="table-title">비율 테이블</div>
+      <div id="stats-scroll">
+        <table class="ratio-table" id="ratio-table">
+          <thead><tr>
+            <th style="width:16px"></th>
+            <th>분류</th>
+            <th style="width:120px">비율</th>
+            <th>건수</th>
+          </tr></thead>
+          <tbody id="ratio-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 범례 -->
+    <div class="panel">
+      <div class="panel-title" id="legend-title">범례</div>
+      <div id="legend-list"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API_KEY = 'B757AF6A-11F0-3880-A869-62AF3F19FACF';
+
+// ── 색상 정의 ──────────────────────────────────────────────────
+const YODO_COLORS = {
+  '제1종전용주거지역':'#FFE0B2','제2종전용주거지역':'#FFCC80',
+  '제1종일반주거지역':'#FFF176','제2종일반주거지역':'#FFEE58',
+  '제3종일반주거지역':'#FFD600','준주거지역':'#FFB300',
+  '중심상업지역':'#E53935','일반상업지역':'#EF6C00',
+  '근린상업지역':'#F9A825','유통상업지역':'#FB8C00',
+  '전용공업지역':'#90A4AE','일반공업지역':'#B0BEC5','준공업지역':'#CFD8DC',
+  '보전녹지지역':'#2E7D32','생산녹지지역':'#43A047','자연녹지지역':'#66BB6A',
+  '개발제한구역':'#795548','지정되지않음':'#E0E0E0',
+};
+const IYONG_COLORS = {
+  '단독':'#FFD54F','다가구':'#FFB74D','다세대':'#FFA726','아파트':'#FF7043',
+  '연립':'#EF5350','주거기타':'#CE93D8','상업용':'#42A5F5','업무용':'#1E88E5',
+  '공업용':'#78909C','전':'#A5D6A7','답':'#81C784','임야':'#388E3C',
+  '도로':'#BDBDBD','하천':'#4FC3F7','기타나지':'#D7CCC8',
+};
+const JUYONG_COLORS = {
+  '단독주택':'#FFD54F','공동주택':'#FF7043',
+  '제1종근린생활시설':'#42A5F5','제2종근린생활시설':'#1565C0',
+  '문화및집회시설':'#AB47BC','판매시설':'#E91E63','운수시설':'#607D8B',
+  '의료시설':'#EF9A9A','교육연구시설':'#66BB6A','노유자시설':'#80DEEA',
+  '수련시설':'#80CBC4','운동시설':'#FFD180','업무시설':'#1E88E5',
+  '숙박시설':'#F06292','위락시설':'#FF6D00','공장':'#90A4AE',
+  '창고시설':'#BCAAA4','자동차관련시설':'#546E7A','교정시설':'#37474F',
+  '방송통신시설':'#6D4C41','발전시설':'#5D4037','관광휴게시설':'#AED581',
+};
+const CENSUS_BREAKS = [0,15000,20000,25000,32000,Infinity];
+const CENSUS_COLORS_ARR = ['#EFF3FF','#BDD7E7','#6BAED6','#3182BD','#08519C'];
+const CENSUS_LABELS = ['~14,999명','15,000~19,999명','20,000~24,999명','25,000~31,999명','32,000명 이상'];
+
+function getColor(props, view) {
+  if (view==='yodojiyeok') return YODO_COLORS[props.yodojiyeok]||'#E0E0E0';
+  if (view==='iyongsang') {
+    const k=props.iyongsang||'';
+    for (const [key,col] of Object.entries(IYONG_COLORS)) if(k.includes(key)) return col;
+    return '#E0E0E0';
+  }
+  if (view==='juyongdo') return props.juyongdo ? (JUYONG_COLORS[props.juyongdo]||'#90CAF9') : '#E8E8E8';
+  return '#E0E0E0';
+}
+function getCensusColor(pop) {
+  if (!pop) return '#f0f0f0';
+  for (let i=0;i<CENSUS_BREAKS.length-1;i++) if(pop<CENSUS_BREAKS[i+1]) return CENSUS_COLORS_ARR[i];
+  return CENSUS_COLORS_ARR[CENSUS_COLORS_ARR.length-1];
+}
+
+// ── 지도 ─────────────────────────────────────────────────────
+const map = L.map('map',{zoomControl:true,preferCanvas:true}).setView([37.5894,127.0167],14);
+L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${API_KEY}/Base/{z}/{y}/{x}.png`,
+  {attribution:'© Vworld',maxZoom:19}).addTo(map);
+
+const canvasRenderer = L.canvas({padding:0.5});
+
+// ── 상태 ─────────────────────────────────────────────────────
+let currentView='yodojiyeok';
+let geojsonLayer=null, censusLayer=null;
+let allFeatures=[], censusFeatures=[];
+let pieChart=null;
+
+// ── 데이터 로드 ───────────────────────────────────────────────
+Promise.all([
+  fetch('seongbuk_land.geojson').then(r=>{
+    document.getElementById('loading-msg').textContent='필지 데이터 파싱 중...';
+    return r.json();
+  }),
+  fetch('seongbuk_dong.geojson').then(r=>r.json()).catch(()=>null),
+]).then(([land,dong])=>{
+  allFeatures=land.features;
+  if(dong) censusFeatures=dong.features;
+  document.getElementById('loading-msg').textContent='렌더링 중...';
+  setTimeout(()=>{
+    renderLayer(); updateChart(); updateTable(); updateLegend();
+    document.getElementById('loading').style.display='none';
+  },30);
+}).catch(e=>{ document.getElementById('loading-msg').textContent='오류: '+e.message; });
+
+// ── 레이어 렌더링 ─────────────────────────────────────────────
+function renderLayer() {
+  if(geojsonLayer){ map.removeLayer(geojsonLayer); geojsonLayer=null; }
+  if(censusLayer){ map.removeLayer(censusLayer); censusLayer=null; }
+
+  const tooltip = document.getElementById('map-tooltip');
+  const ttMain  = document.getElementById('tt-main');
+  const ttSub   = document.getElementById('tt-sub');
+
+  if(currentView==='census') {
+    censusLayer = L.geoJSON({type:'FeatureCollection',features:censusFeatures},{
+      renderer: canvasRenderer,
+      style: f=>({
+        fillColor:getCensusColor(f.properties.tot_pop),
+        fillOpacity:0.78, weight:1, color:'#444', opacity:0.6,
+      }),
+      onEachFeature:(f,layer)=>{
+        const p=f.properties;
+        layer.on('mousemove',e=>{
+          tooltip.style.display='block';
+          tooltip.style.left=(e.originalEvent.pageX+14)+'px';
+          tooltip.style.top=(e.originalEvent.pageY-36)+'px';
+          ttMain.textContent=p.adm_nm||'';
+          ttSub.textContent='인구: '+(p.tot_pop?p.tot_pop.toLocaleString()+' 명':'데이터 없음');
+        });
+        layer.on('mouseout',()=>tooltip.style.display='none');
+        layer.on('click',()=>showCensusPopup(p));
+      }
+    }).addTo(map);
+  } else {
+    geojsonLayer = L.geoJSON({type:'FeatureCollection',features:allFeatures},{
+      renderer: canvasRenderer,
+      style: f=>({
+        fillColor:getColor(f.properties,currentView),
+        fillOpacity:0.75, weight:0.4, color:'#666', opacity:0.5,
+      }),
+      onEachFeature:(f,layer)=>{
+        const p=f.properties;
+        layer.on('mousemove',e=>{
+          tooltip.style.display='block';
+          tooltip.style.left=(e.originalEvent.pageX+14)+'px';
+          tooltip.style.top=(e.originalEvent.pageY-36)+'px';
+          if(currentView==='yodojiyeok'){
+            ttMain.textContent=p.yodojiyeok||'미분류';
+            ttSub.textContent=p.address+' '+p.jibun+'번지 · '+
+              (p.area?p.area.toLocaleString()+'㎡':'');
+          } else if(currentView==='iyongsang'){
+            ttMain.textContent=p.iyongsang||'미분류';
+            ttSub.textContent=p.address+' '+p.jibun+'번지';
+          } else {
+            ttMain.textContent=p.juyongdo||'(건축물 정보 없음)';
+            ttSub.textContent=p.address+' '+p.jibun+'번지';
+          }
+        });
+        layer.on('mouseout',()=>tooltip.style.display='none');
+        layer.on('click',()=>showPopup(p));
+        layer.on('mouseover',function(){
+          this.setStyle({weight:1.5,color:'#111',fillOpacity:0.9});
+        });
+        layer.on('mouseout',function(){
+          tooltip.style.display='none';
+          geojsonLayer&&geojsonLayer.resetStyle(this);
+        });
+      }
+    }).addTo(map);
+  }
+}
+
+// ── 클릭 팝업 ────────────────────────────────────────────────
+function showPopup(p) {
+  document.getElementById('popup-panel').style.display='block';
+  document.getElementById('popup-addr').textContent=p.address+' '+p.jibun+'번지';
+  const colorMap=currentView==='yodojiyeok'?YODO_COLORS:currentView==='iyongsang'?IYONG_COLORS:JUYONG_COLORS;
+  const tagColor=getColor(p,currentView);
+
+  const cells=[
+    {k:'용도지역', v:`<span class="tag" style="background:${YODO_COLORS[p.yodojiyeok]||'#aaa'};color:${isLight(YODO_COLORS[p.yodojiyeok]||'#aaa')?'#333':'white'}">${p.yodojiyeok||'-'}</span>`},
+    {k:'이용상황', v:p.iyongsang||'-'},
+    {k:'지목',     v:p.jimok||'-'},
+    {k:'면적',     v:p.area?p.area.toLocaleString()+' ㎡':'-'},
+    {k:'공시지가', v:p.gongsi?p.gongsi.toLocaleString()+' 원/㎡':'-'},
+    {k:'건축물 주용도', v:p.juyongdo||'-', wide:true},
+    {k:'연면적',   v:p.yeonmyeon?p.yeonmyeon.toLocaleString()+' ㎡':'-'},
+    {k:'세대수',   v:p.sedaesu>0?p.sedaesu+' 세대':'-'},
+  ];
+  document.getElementById('popup-grid').innerHTML=cells.map(c=>
+    `<div class="info-cell${c.wide?' wide':''}">
+      <div class="ik">${c.k}</div>
+      <div class="iv">${c.v}</div>
+    </div>`
+  ).join('');
+}
+
+function showCensusPopup(p) {
+  document.getElementById('popup-panel').style.display='block';
+  document.getElementById('popup-addr').textContent=p.adm_nm||p.adm_cd;
+  document.getElementById('popup-grid').innerHTML=`
+    <div class="info-cell wide">
+      <div class="ik">행정동코드</div><div class="iv">${p.adm_cd}</div>
+    </div>
+    <div class="info-cell wide">
+      <div class="ik">총인구</div>
+      <div class="iv" style="font-size:16px;color:#2563a8">${p.tot_pop?p.tot_pop.toLocaleString()+' 명':'데이터 없음'}</div>
+    </div>`;
+}
+
+function isLight(hex) {
+  if(!hex||hex==='#E0E0E0') return true;
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return (r*299+g*587+b*114)/1000 > 160;
+}
+
+// ── 차트 ─────────────────────────────────────────────────────
+function updateChart() {
+  const {labels,values,colors}=getChartData();
+  const total=values.reduce((a,b)=>a+b,0);
+  if(pieChart) pieChart.destroy();
+  pieChart=new Chart(document.getElementById('myChart'),{
+    type:'doughnut',
+    data:{labels,datasets:[{data:values,backgroundColor:colors,borderWidth:1,borderColor:'#fff'}]},
+    options:{
+      responsive:true, maintainAspectRatio:false, cutout:'52%',
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{
+          label:ctx=>` ${ctx.label}: ${ctx.raw.toLocaleString()}건 (${(ctx.raw/total*100).toFixed(1)}%)`
+        }}
+      }
+    }
+  });
+}
+
+// ── 비율 테이블 ───────────────────────────────────────────────
+function updateTable() {
+  const {labels,values,colors,fullData}=getChartData();
+  const total=fullData.reduce((a,[,v])=>a+v,0);
+  const maxVal=fullData[0]?.[1]||1;
+
+  document.getElementById('ratio-body').innerHTML=fullData.map(([label,cnt],i)=>{
+    const pct=(cnt/total*100).toFixed(1);
+    const color=colors[Math.min(i,colors.length-1)];
+    const barW=Math.round(cnt/maxVal*100);
+    return `<tr>
+      <td><div style="width:10px;height:10px;border-radius:50%;background:${color};margin:auto"></div></td>
+      <td style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${label}">${label}</td>
+      <td>
+        <div class="ratio-bar-wrap">
+          <div class="ratio-bar-bg"><div class="ratio-bar" style="width:${barW}%;background:${color}"></div></div>
+          <span class="ratio-pct">${pct}%</span>
+        </div>
+      </td>
+      <td>${cnt.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── 데이터 집계 ───────────────────────────────────────────────
+function getChartData() {
+  const viewTitles={
+    yodojiyeok:'용도지역 분포', iyongsang:'이용상황 분포',
+    juyongdo:'주용도 분포', census:'읍면동별 인구'
+  };
+  document.getElementById('chart-title').textContent=viewTitles[currentView];
+  document.getElementById('table-title').textContent='비율 테이블 — '+viewTitles[currentView];
+
+  if(currentView==='census') {
+    const sorted=[...censusFeatures]
+      .filter(f=>f.properties.tot_pop>0)
+      .sort((a,b)=>b.properties.tot_pop-a.properties.tot_pop);
+    const labels=sorted.map(f=>f.properties.adm_nm||f.properties.adm_cd);
+    const values=sorted.map(f=>f.properties.tot_pop);
+    const total=values.reduce((a,b)=>a+b,0);
+    const colors=sorted.map(f=>getCensusColor(f.properties.tot_pop));
+    return {labels,values,colors,fullData:sorted.map(f=>[f.properties.adm_nm,f.properties.tot_pop])};
+  }
+
+  const colorMap=currentView==='yodojiyeok'?YODO_COLORS:currentView==='iyongsang'?IYONG_COLORS:JUYONG_COLORS;
+  const count={};
+  for(const f of allFeatures){
+    const p=f.properties;
+    let key=currentView==='juyongdo'?(p.juyongdo||'(정보없음)'):(p[currentView]||'(미분류)');
+    count[key]=(count[key]||0)+1;
+  }
+  const sorted=Object.entries(count).sort((a,b)=>b[1]-a[1]);
+  const top8=sorted.slice(0,8);
+  const others=sorted.slice(8).reduce((s,[,v])=>s+v,0);
+  if(others>0) top8.push(['기타',others]);
+
+  const labels=top8.map(([l])=>l);
+  const values=top8.map(([,v])=>v);
+  const colors=labels.map(l=>colorMap[l]||'#B0BEC5');
+  return {labels,values,colors,fullData:sorted};
+}
+
+// ── 범례 ─────────────────────────────────────────────────────
+function updateLegend() {
+  if(currentView==='census'){
+    document.getElementById('legend-title').textContent='인구 단계 범례';
+    document.getElementById('legend-list').innerHTML=
+      CENSUS_LABELS.map((l,i)=>
+        `<div class="legend-item"><div class="legend-dot" style="background:${CENSUS_COLORS_ARR[i]}"></div>${l}</div>`
+      ).join('')+
+      `<div class="legend-item"><div class="legend-dot" style="background:#f0f0f0;border:1px solid #ccc"></div>데이터 없음</div>`;
+    return;
+  }
+  const titleMap={yodojiyeok:'용도지역',iyongsang:'이용상황',juyongdo:'주용도'};
+  document.getElementById('legend-title').textContent=titleMap[currentView]+' 범례';
+  const colorMap=currentView==='yodojiyeok'?YODO_COLORS:currentView==='iyongsang'?IYONG_COLORS:JUYONG_COLORS;
+  const used=new Set(allFeatures.map(f=>{
+    const p=f.properties;
+    return currentView==='juyongdo'?(p.juyongdo||''):(p[currentView]||'');
+  }));
+  document.getElementById('legend-list').innerHTML=
+    Object.entries(colorMap).filter(([k])=>used.has(k)).map(([l,c])=>
+      `<div class="legend-item"><div class="legend-dot" style="background:${c}"></div>${l}</div>`
+    ).join('')+
+    `<div class="legend-item"><div class="legend-dot" style="background:#E0E0E0;border:1px solid #ccc"></div>기타</div>`;
+}
+
+// ── 뷰 전환 ──────────────────────────────────────────────────
+function setView(view){
+  currentView=view;
+  document.querySelectorAll('.view-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('btn-'+view).classList.add('active');
+  document.getElementById('popup-panel').style.display='none';
+  renderLayer(); updateChart(); updateTable(); updateLegend();
+}
+</script>
+</body>
+</html>

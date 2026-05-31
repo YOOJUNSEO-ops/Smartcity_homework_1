@@ -1,0 +1,30 @@
+# ── 원본 데이터 (용량 큼, 재생성 가능) ──────────────
+*.zip
+토지이용/
+census/
+census2/
+집계구/
+dong_shp/
+
+# ── 임시 처리 파일 ────────────────────────────────
+pdf_encoded.txt
+pdf_text.txt
+csv_path.txt
+shp_path2.txt
+seongbuk_census.geojson
+
+# ── 스크린샷 ─────────────────────────────────────
+screenshot_*.png
+ss_new_*.png
+스크린샷*.png
+
+# ── 잘못 받은 파일 ────────────────────────────────
+인구__가구_및_주택_*.csv
+
+# ── Python 캐시 ───────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Claude Code 설정 ──────────────────────────────
+.claude/
